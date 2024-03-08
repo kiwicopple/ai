@@ -8,7 +8,7 @@
 
   Interface:
   - public.keys: view -> List of all the profiles the user has access to
-  - public.validate_key(): function -> Validates a single key
+  - public.validate_key(): function -> Validates a single key, determining if it is active and belongs to the organization
 */
 
 
