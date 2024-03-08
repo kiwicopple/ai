@@ -58,10 +58,11 @@ Deno.serve(async (req) => {
       OLLAMA_URL,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(input),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: input.model,
+          messages: input.messages,
+        }),
       },
     );
     const data = await res.json();
@@ -83,13 +84,10 @@ Deno.serve(async (req) => {
     const log = logQuery.rows[0];
 
     // Return the response to the user
-    return new Response(
-      JSON.stringify({
-        ...data,
-        id: log?.id ?? null,
-      }),
-      { headers: { "Content-Type": "application/json" } },
-    );
+    const logId = log?.id ?? null;
+    const response = JSON.stringify({ ...data, id: logId });
+    const options = { headers: { "Content-Type": "application/json" } };
+    return new Response(response, options);
   } catch (err) {
     console.log("err", err);
     const error = String(err?.message ?? err);
