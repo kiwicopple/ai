@@ -58,7 +58,7 @@ create table "private"."requests" (
   "model" text,
   "input" jsonb,
   "response" jsonb,
-  "feedback" boolean
+  "feedback" jsonb
 );
 -- Enable RLS
 alter table "private"."requests" enable row level security;

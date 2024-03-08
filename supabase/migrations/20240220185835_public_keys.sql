@@ -56,7 +56,7 @@ as $$
     select 1
     from "private"."keys"
     where "id" = "key_id"
-    and "organization_id" in (select * from private.belongs_to("user_id"))
+    and "organization_id" in (select * from public.belongs_to())
     and "active" = true
   );
 $$;

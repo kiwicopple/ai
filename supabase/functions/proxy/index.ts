@@ -26,51 +26,36 @@
 
 */
 // import { createClient } from "https://esm.sh/@supabase/supabase-js";
-
 import * as postgres from "https://deno.land/x/postgres@v0.17.0/mod.ts";
 
-// Get the connection string from the environment variable "SUPABASE_DB_URL"
-const databaseUrl = Deno.env.get("SUPABASE_DB_URL")!;
+const POSTGRES_URL = Deno.env.get("SUPABASE_DB_URL")!;
+const OLLAMA_URL = "http://host.docker.internal:11434/v1/chat/completions";
 
 // Create a database pool with three connections that are lazily established
-const pool = new postgres.Pool(databaseUrl, 3, true);
+const pool = new postgres.Pool(POSTGRES_URL, 3, true);
 
 Deno.serve(async (req) => {
   const connection = await pool.connect();
   try {
     const input = await req.json();
+    const secretKey = req.headers.get("Authorization")?.replace("Bearer ", "");
 
-    // Run a query
-    const result = await connection.queryObject`
-        select * 
-        from private.keys
-      `;
-    const keys = result.rows;
+    // Validate the key
+    type keyDataType = { id: string; organization_id: string };
+    const result = await connection.queryObject<keyDataType>`
+      select id, organization_id
+      from private.keys
+      where active = true and id = ${secretKey}
+      limit 1
+    `;
+    const keyData = result.rows[0];
+    if (!keyData) {
+      throw new Error("Invalid key.");
+    }
 
-    // Encode the result as pretty printed JSON
-    const body = JSON.stringify(
-      keys,
-      (k, value) => (typeof value === "bigint" ? value.toString() : value),
-      2,
-    );
-
-    console.log("body", body);
-
-    // // Authenticate the API Token
-    // const { error: keyError } = await supabase
-    //   .from("keys")
-    //   .select("id")
-    //   .match({
-    //     "id": req.headers.get("Authorization")!,
-    //     "organization_id": req.headers.get("x-org-id"), // temporary
-    //   })
-    //   .maybeSingle();
-
-    // if (keyError) throw keyError;
-
-    // Pass the request to Ollama on http://localhost:11434/v1/chat/completions
+    // Pass the request to Ollama
     const res = await fetch(
-      "http://host.docker.internal:11434/v1/chat/completions",
+      OLLAMA_URL,
       {
         method: "POST",
         headers: {
@@ -81,32 +66,38 @@ Deno.serve(async (req) => {
     );
     const data = await res.json();
 
-    // // Store the response in the database
-    // const { data: history, error } = await supabase
-    //   .from("requests")
-    //   .insert({
-    //     model: input.model,
-    //     organization_id: req.headers.get("x-org-id"),
-    //     input,
-    //     response: data,
-    //   })
-    //   .select("id")
-    //   .maybeSingle();
-    // if (error) throw error;
+    // Store the request for use to train on
+    const model = input.model;
+    const organization_id = keyData.organization_id;
+    const logQuery = await connection.queryObject<{ id: string }>`
+      insert into private.requests (model, organization_id, input, response, key_id)
+      values (
+        ${model},
+        ${organization_id},
+        ${input},
+        ${data},
+        ${secretKey}
+      )
+      returning id;
+    `;
+    const log = logQuery.rows[0];
 
     // Return the response to the user
     return new Response(
       JSON.stringify({
         ...data,
-        // id: history?.id ?? null,
+        id: log?.id ?? null,
       }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (err) {
     console.log("err", err);
-    return new Response(String(err?.message ?? err), { status: 500 });
+    const error = String(err?.message ?? err);
+    return new Response(JSON.stringify({ error }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   } finally {
-    // Release the connection back into the pool
     connection.release();
   }
 });
