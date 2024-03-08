@@ -9,6 +9,7 @@
 
   curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/proxy' \
     --header 'Content-Type: application/json' \
+    --header 'x-org-id: org_2cribTfm5N1T2Ac9qH2Xc48pE0k' \
     --data '{
         "model": "llama2",
         "messages": [
@@ -24,24 +25,48 @@
     }'
 
 */
-import { createClient } from "https://esm.sh/@supabase/supabase-js";
+// import { createClient } from "https://esm.sh/@supabase/supabase-js";
+
+import * as postgres from "https://deno.land/x/postgres@v0.17.0/mod.ts";
+
+// Get the connection string from the environment variable "SUPABASE_DB_URL"
+const databaseUrl = Deno.env.get("SUPABASE_DB_URL")!;
+
+// Create a database pool with three connections that are lazily established
+const pool = new postgres.Pool(databaseUrl, 3, true);
 
 Deno.serve(async (req) => {
+  const connection = await pool.connect();
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      {
-        global: {
-          headers: { Authorization: req.headers.get("Authorization")! },
-        },
-      },
-    );
-
     const input = await req.json();
 
-    // TODO: Authenticate the API Token
-    console.log("API validation");
+    // Run a query
+    const result = await connection.queryObject`
+        select * 
+        from private.keys
+      `;
+    const keys = result.rows;
+
+    // Encode the result as pretty printed JSON
+    const body = JSON.stringify(
+      keys,
+      (k, value) => (typeof value === "bigint" ? value.toString() : value),
+      2,
+    );
+
+    console.log("body", body);
+
+    // // Authenticate the API Token
+    // const { error: keyError } = await supabase
+    //   .from("keys")
+    //   .select("id")
+    //   .match({
+    //     "id": req.headers.get("Authorization")!,
+    //     "organization_id": req.headers.get("x-org-id"), // temporary
+    //   })
+    //   .maybeSingle();
+
+    // if (keyError) throw keyError;
 
     // Pass the request to Ollama on http://localhost:11434/v1/chat/completions
     const res = await fetch(
@@ -56,24 +81,32 @@ Deno.serve(async (req) => {
     );
     const data = await res.json();
 
-    // Store the response in the database
-    const { data: history, error } = await supabase.from("history").insert({
-      model: input.model,
-      tenant_id: "1090dc33-f354-427c-b488-a9d9fd25ee82", // temporary
-      input,
-      response: data,
-    }).select("id").maybeSingle();
-    if (error) throw error;
+    // // Store the response in the database
+    // const { data: history, error } = await supabase
+    //   .from("requests")
+    //   .insert({
+    //     model: input.model,
+    //     organization_id: req.headers.get("x-org-id"),
+    //     input,
+    //     response: data,
+    //   })
+    //   .select("id")
+    //   .maybeSingle();
+    // if (error) throw error;
 
     // Return the response to the user
     return new Response(
       JSON.stringify({
         ...data,
-        id: history?.id ?? null,
+        // id: history?.id ?? null,
       }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (err) {
+    console.log("err", err);
     return new Response(String(err?.message ?? err), { status: 500 });
+  } finally {
+    // Release the connection back into the pool
+    connection.release();
   }
 });
