@@ -82,6 +82,7 @@ Deno.serve(async (req) => {
       returning id;
     `;
     const log = logQuery.rows[0];
+    console.log("log", log);
 
     // Return the response to the user
     const logId = log?.id ?? null;
